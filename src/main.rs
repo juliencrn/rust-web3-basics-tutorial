@@ -8,9 +8,11 @@ use web3::types::{Address, H160, U256};
 async fn main() -> web3::Result<()> {
     dotenv::dotenv().ok();
 
+    // Initiate web3
     let websocket = web3::transports::WebSocket::new(&env::var("RPC_URL").unwrap()).await?;
     let web3s = web3::Web3::new(websocket);
 
+    // Get accounts
     let mut accounts = web3s.eth().accounts().await?;
     accounts.push(H160::from_str(&env::var("ACCOUNT_ADDRESS").unwrap()).unwrap());
     println!("Accounts: {:?}", accounts);
@@ -20,6 +22,7 @@ async fn main() -> web3::Result<()> {
         println!("ETH balance of {:?}: {}", account, wei_to_eth(balance),)
     }
 
+    // Get AAVE contract
     let aave_addr = Address::from_str("0x42447d5f59d5bf78a82c34663474922bdf278162").unwrap();
     let aave_token_contract = Contract::from_json(
         web3s.eth(),
@@ -39,6 +42,23 @@ async fn main() -> web3::Result<()> {
         .unwrap();
 
     println!("Token name: {}, total supply: {}", token_name, total_supply);
+
+    // Instantiate Uniswap v2 router
+    let router_addr = Address::from_str("0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D").unwrap();
+    let router_contract = Contract::from_json(
+        web3s.eth(),
+        router_addr,
+        include_bytes!("uniswap_v2_router02_abi.json"),
+    )
+    .unwrap();
+
+    // Get WETH token
+    let weth_addr: Address = router_contract
+        .query("WETH", (), None, Options::default(), None)
+        .await
+        .unwrap();
+
+    println!("WETH address: {:?}", &weth_addr);
 
     Ok(())
 }
