@@ -2,8 +2,10 @@ use std::env;
 use std::str::FromStr;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use secp256k1::key::SecretKey;
+use web3::contract::tokens::Tokenize;
 use web3::contract::{Contract, Options};
-use web3::types::{Address, H160, U256};
+use web3::types::{Address, Bytes, TransactionParameters, H160, U256};
 
 #[tokio::main]
 async fn main() -> web3::Result<()> {
@@ -18,10 +20,10 @@ async fn main() -> web3::Result<()> {
     accounts.push(H160::from_str(&env::var("ACCOUNT_ADDRESS").unwrap()).unwrap());
     println!("Accounts: {:?}", accounts);
 
-    // for account in accounts {
-    //     let balance = web3s.eth().balance(account, None).await?;
-    //     println!("ETH balance of {:?}: {}", account, wei_to_eth(balance),)
-    // }
+    for account in &accounts {
+        let balance = web3s.eth().balance(*account, None).await?;
+        println!("ETH balance of {:?}: {}", account, wei_to_eth(balance),)
+    }
 
     // Get AAVE contract
     let aave_addr = Address::from_str("0x42447d5f59d5bf78a82c34663474922bdf278162").unwrap();
@@ -91,6 +93,59 @@ async fn main() -> web3::Result<()> {
         .expect("Error");
 
     println!("estimated gas amount: {}", out_gas_estimate);
+
+    // Prepare "swapExactETHForTokens" params
+    let data = router_contract
+        .abi()
+        .function("swapExactETHForTokens")
+        .unwrap()
+        .encode_input(
+            &(
+                U256::from_dec_str("106662000000").unwrap(),
+                vec![weth_addr, dai_addr],
+                accounts[0],
+                U256::from_dec_str(&valid_timestamp.to_string()).unwrap(),
+            )
+                .into_tokens(),
+        )
+        .unwrap();
+
+    let nonce = web3s
+        .eth()
+        .transaction_count(accounts[0], None)
+        .await
+        .unwrap();
+    println!("nonce: {}", nonce);
+
+    let transaction_object = TransactionParameters {
+        nonce: Some(nonce),
+        to: Some(router_addr),
+        value: U256::exp10(18).checked_div(20.into()).unwrap(),
+        gas_price: Some(gas_price),
+        gas: out_gas_estimate,
+        data: Bytes(data),
+        ..Default::default()
+    };
+
+    println!("transaction object: {:?}", transaction_object);
+
+    // Sign the transaction
+    let private_key = SecretKey::from_str(&env::var("PRIVATE_KEY").unwrap()).unwrap();
+    let signed_transaction = web3s
+        .accounts()
+        .sign_transaction(transaction_object, &private_key)
+        .await
+        .unwrap();
+    println!("signed transaction {:?}", signed_transaction);
+
+    // Send the transaction
+    let result = web3s
+        .eth()
+        .send_raw_transaction(signed_transaction.raw_transaction)
+        .await
+        .unwrap();
+
+    println!("Transaction successful with hash: {:?}", result);
 
     Ok(())
 }
